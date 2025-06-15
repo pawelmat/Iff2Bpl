@@ -108,6 +108,7 @@ size_t decompress_packbits(const uint8_t* src, size_t src_len, uint8_t* dst, siz
 }
 
 int main(int argc, char* argv[]) {
+    printf("IFF to Amiga BPL converter (c) Kane/Sct 2025\n");
     if (argc < 2) {
         printf("Usage: %s <.iff file>\n", argv[0]);
         return 1;
