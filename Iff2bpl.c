@@ -210,16 +210,17 @@ int main(int argc, char* argv[]) {
             fprintf(stderr, "Failed to allocate memory for palette words\n");
         } else {
             for (size_t i = 0; i < num_entries; ++i) {
-            uint8_t r = cmap_data[i * 3 + 0];
-            uint8_t g = cmap_data[i * 3 + 1];
-            uint8_t b = cmap_data[i * 3 + 2];
-            // Take lower 4 bits of each and place as described
-            uint16_t word = 0;
-            word |= ((r & 0x0F) << 8); // bits 12-9
-            word |= ((g & 0x0F) << 4); // bits 8-5
-            word |= ((b & 0x0F)); // bits 4-1
-            word = (word >> 8) | (word << 8);
-            pal_words[i] = word;
+                // rescale the colours from 8 bits to 4 bits
+                uint8_t r = (cmap_data[i * 3 + 0]*16/256);
+                uint8_t g = (cmap_data[i * 3 + 1]*16/256);
+                uint8_t b = (cmap_data[i * 3 + 2]*16/256);
+                // Take lower 4 bits of each and place as described
+                uint16_t word = 0;
+                word |= ((r & 0x0F) << 8); // bits 12-9
+                word |= ((g & 0x0F) << 4); // bits 8-5
+                word |= ((b & 0x0F)); // bits 4-1
+                word = (word >> 8) | (word << 8);
+                pal_words[i] = word;
             }
             printf("+CMAP Pallette (%u colours):\n", num_entries);
             print_hex((uint8_t*)pal_words, num_entries * sizeof(uint16_t));
