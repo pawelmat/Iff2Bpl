@@ -4,11 +4,28 @@
     Converts ILBM (IFF) files to raw (interleaved) bitplane format for use in Amiga applications. 
     It assumes the input file is a valid ILBM file and does not perform extensive error checking.
     Writes the BPL data to a .bpl file, and the palette to a .pal file.
-    The output files will be named based on the input file name, with .bpl and .pal extensions.
+    Optionally creates a chunky format file (.chk) for software-based pixel manipulation.
+    Optionally creates a non-interleaved planar format file (.bpf) for specific development needs.
+    The output files will be named based on the input file name, with .bpl, .pal, .chk, and .bpf extensions.
 
-    Usage: iff2bpl <input.iff>
-    Example: iff2bpl myimage.iff
-    Output: myimage.bpl (bitplane data) and myimage.pal (palette data)
+    Usage: iff2bpl [-o output_name] [-c] [-ni] <input.iff>
+    Options:
+      -o output_name  Specify custom base name for output files
+      -c              Also create chunky format output (.chk file)
+      -ni             Also create non-interleaved planar format (.bpf file)
+
+    Examples: 
+      iff2bpl myimage.iff                Creates myimage.bpl and myimage.pal
+      iff2bpl -o sprite myimage.iff      Creates sprite.bpl and sprite.pal
+      iff2bpl -c myimage.iff             Creates myimage.bpl, myimage.pal and myimage.chk
+      iff2bpl -ni myimage.iff            Creates myimage.bpl, myimage.pal and myimage.bpf
+      iff2bpl -c -ni -o sprite myimage.iff Creates sprite.bpl, sprite.pal, sprite.chk and sprite.bpf
+
+    Output: 
+      .bpl file - Raw bitplane data (interleaved format for Amiga hardware - default)
+      .pal file - Palette data (16-bit words in Amiga color register format)
+      .chk file - Chunky pixel data (8-bit per pixel, optional with -c flag)
+      .bpf file - Non-interleaved planar data (all rows of plane 0, then plane 1, etc., optional with -ni flag)
 
     Compiles with: gcc iff2bpl.c -o iff2bpl.exe
     You can also use VS Code with the included configuration files to build this project.
@@ -107,14 +124,104 @@ size_t decompress_packbits(const uint8_t* src, size_t src_len, uint8_t* dst, siz
     return di;
 }
 
+void print_usage(const char* program_name) {
+    printf("Usage: %s [-o output_name] [-c] [-ni] <.iff file>\n", program_name);
+    printf("  -o output_name  Specify custom base name for output files\n");
+    printf("  -c              Also create chunky format output (.chk file)\n");
+    printf("  -ni             Also create non-interleaved planar format (.bpf file)\n");
+    printf("  <.iff file>     Input IFF/ILBM file to convert\n");
+    printf("\n");
+    printf("Examples:\n");
+    printf("  %s image.iff              Creates image.bpl and image.pal\n", program_name);
+    printf("  %s -o sprite image.iff    Creates sprite.bpl and sprite.pal\n", program_name);
+    printf("  %s -c image.iff           Creates image.bpl, image.pal and image.chk\n", program_name);
+    printf("  %s -ni image.iff          Creates image.bpl, image.pal and image.bpf\n", program_name);
+    printf("  %s -c -ni -o sprite image.iff Creates sprite.bpl, sprite.pal, sprite.chk and sprite.bpf\n", program_name);
+}
+
+// Convert planar bitplane data to chunky format
+void convert_to_chunky(const uint8_t* planar_data, uint8_t* chunky_data, 
+                      uint16_t width, uint16_t height, uint8_t num_planes) {
+    size_t row_bytes = ((width + 15) / 16) * 2; // bytes per row per plane
+    
+    for (uint16_t y = 0; y < height; y++) {
+        for (uint16_t x = 0; x < width; x++) {
+            uint8_t pixel_value = 0;
+            
+            // Extract bit from each plane to build pixel value
+            for (uint8_t plane = 0; plane < num_planes; plane++) {
+                size_t plane_offset = (y * num_planes + plane) * row_bytes;
+                size_t byte_offset = x / 8;
+                uint8_t bit_offset = 7 - (x % 8);
+                
+                if (plane_offset + byte_offset < (size_t)(height * num_planes * row_bytes)) {
+                    uint8_t byte_val = planar_data[plane_offset + byte_offset];
+                    uint8_t bit_val = (byte_val >> bit_offset) & 1;
+                    pixel_value |= (bit_val << plane);
+                }
+            }
+            
+            chunky_data[y * width + x] = pixel_value;
+        }
+    }
+}
+
+// Convert interleaved planar data to non-interleaved planar format
+void convert_to_noninterleaved(const uint8_t* interleaved_data, uint8_t* noninterleaved_data,
+                              uint16_t width, uint16_t height, uint8_t num_planes) {
+    size_t row_bytes = ((width + 15) / 16) * 2; // bytes per row per plane
+    size_t plane_size = row_bytes * height; // bytes per complete plane
+    
+    for (uint8_t plane = 0; plane < num_planes; plane++) {
+        for (uint16_t y = 0; y < height; y++) {
+            // Source: interleaved format - plane data is mixed row by row
+            size_t src_offset = (y * num_planes + plane) * row_bytes;
+            // Destination: non-interleaved format - all rows of one plane together
+            size_t dst_offset = (plane * plane_size) + (y * row_bytes);
+            
+            memcpy(noninterleaved_data + dst_offset, interleaved_data + src_offset, row_bytes);
+        }
+    }
+}
+
 int main(int argc, char* argv[]) {
     printf("IFF to Amiga BPL converter (c) Kane/Sct 2025\n");
     if (argc < 2) {
-        printf("Usage: %s <.iff file>\n", argv[0]);
+        print_usage(argv[0]);
         return 1;
     }
 
-    const char* filename = argv[1];
+    const char* input_filename = NULL;
+    const char* output_name = NULL;
+    int create_chunky = 0;
+    int create_noninterleaved = 0;
+    
+    // Parse command line arguments
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-o") == 0) {
+            if (i + 1 < argc) {
+                output_name = argv[++i];
+            } else {
+                fprintf(stderr, "Error: -o option requires an output filename\n");
+                print_usage(argv[0]);
+                return 1;
+            }
+        } else if (strcmp(argv[i], "-c") == 0) {
+            create_chunky = 1;
+        } else if (strcmp(argv[i], "-ni") == 0) {
+            create_noninterleaved = 1;
+        } else {
+            input_filename = argv[i];
+        }
+    }
+    
+    if (!input_filename) {
+        fprintf(stderr, "Error: No input file specified\n");
+        print_usage(argv[0]);
+        return 1;
+    }
+
+    const char* filename = input_filename;
     FILE* f = fopen(filename, "rb");
     if (!f) {
         fprintf(stderr, "Failed to open file: %s\n", filename);
@@ -129,15 +236,22 @@ int main(int argc, char* argv[]) {
     printf("Input file: %s\n", filename);
     printf("File size: %ld bytes\n", filesize);
 
-    // Strip extension from filename if present
+    // Determine the base filename for output files
     char base_filename[512];
-    strncpy(base_filename, filename, sizeof(base_filename) - 1);
-    base_filename[sizeof(base_filename) - 1] = '\0';
-    char* dot = strrchr(base_filename, '.');
-    if (dot && dot != base_filename) {
-        *dot = '\0';
+    if (output_name) {
+        // Use the specified output name
+        strncpy(base_filename, output_name, sizeof(base_filename) - 1);
+        base_filename[sizeof(base_filename) - 1] = '\0';
+    } else {
+        // Strip extension from input filename if present
+        strncpy(base_filename, filename, sizeof(base_filename) - 1);
+        base_filename[sizeof(base_filename) - 1] = '\0';
+        char* dot = strrchr(base_filename, '.');
+        if (dot && dot != base_filename) {
+            *dot = '\0';
+        }
     }
-    filename = base_filename;
+    const char* output_base = base_filename;
 
     char chunk_id[5] = {0};
     uint32_t chunk_size;
@@ -225,7 +339,7 @@ int main(int argc, char* argv[]) {
             printf("+CMAP Pallette (%u colours):\n", num_entries);
             print_hex((uint8_t*)pal_words, num_entries * sizeof(uint16_t));
 
-            snprintf(pal_filename, sizeof(pal_filename), "%s.pal", filename);
+            snprintf(pal_filename, sizeof(pal_filename), "%s.pal", output_base);
             write_bin(pal_filename, (uint8_t*)pal_words, num_entries * sizeof(uint16_t));
             printf("Pallette written to: %s\n", pal_filename);
             free(pal_words);
@@ -238,12 +352,17 @@ int main(int argc, char* argv[]) {
     if (found_body) {
         printf("+BODY (%u bytes):\n", body_size);
         char bpl_filename[512];
-        snprintf(bpl_filename, sizeof(bpl_filename), "%s.bpl", filename);
+        snprintf(bpl_filename, sizeof(bpl_filename), "%s.bpl", output_base);
+
+        uint8_t* final_planar_data = NULL;
+        size_t final_planar_size = 0;
 
         if (bmhd.compression == 0) {
             // No compression, write as is
             write_bin(bpl_filename, body_data, body_size);
             printf("BODY (uncompressed), size %u bytes, written to: %s\n", body_size, bpl_filename);
+            final_planar_data = body_data;
+            final_planar_size = body_size;
         } else if (bmhd.compression == 1) {
             // RLE compression
             size_t row_bytes = ((bmhd.width + 15) / 16) * 2; // bytes per row per plane
@@ -291,10 +410,50 @@ int main(int argc, char* argv[]) {
                     fprintf(stderr, "Warning: output size does not match expected size (%zu != %zu)\n", out_size, bmhd.height * row_bytes * bmhd.numPlanes);
                 }
                 printf("BODY (decompressed), size %u bytes, written to: %s\n", out_size, bpl_filename);
-                free(out);
+                final_planar_data = out;
+                final_planar_size = out_size;
             }
         } else {
             printf("Unknown compression type: %u\n", bmhd.compression);
+        }
+
+        // Create chunky format if requested
+        if (create_chunky && final_planar_data && found_bmhd) {
+            char chk_filename[512];
+            snprintf(chk_filename, sizeof(chk_filename), "%s.chk", output_base);
+            
+            size_t chunky_size = bmhd.width * bmhd.height;
+            uint8_t* chunky_data = (uint8_t*)malloc(chunky_size);
+            if (!chunky_data) {
+                fprintf(stderr, "Failed to allocate memory for chunky data\n");
+            } else {
+                convert_to_chunky(final_planar_data, chunky_data, bmhd.width, bmhd.height, bmhd.numPlanes);
+                write_bin(chk_filename, chunky_data, chunky_size);
+                printf("Chunky format written to: %s (%zu bytes)\n", chk_filename, chunky_size);
+                free(chunky_data);
+            }
+        }
+
+        // Create non-interleaved planar format if requested
+        if (create_noninterleaved && final_planar_data && found_bmhd) {
+            char bpf_filename[512];
+            snprintf(bpf_filename, sizeof(bpf_filename), "%s.bpf", output_base);
+            
+            size_t noninterleaved_size = final_planar_size;
+            uint8_t* noninterleaved_data = (uint8_t*)malloc(noninterleaved_size);
+            if (!noninterleaved_data) {
+                fprintf(stderr, "Failed to allocate memory for non-interleaved data\n");
+            } else {
+                convert_to_noninterleaved(final_planar_data, noninterleaved_data, bmhd.width, bmhd.height, bmhd.numPlanes);
+                write_bin(bpf_filename, noninterleaved_data, noninterleaved_size);
+                printf("Non-interleaved planar format written to: %s (%zu bytes)\n", bpf_filename, noninterleaved_size);
+                free(noninterleaved_data);
+            }
+        }
+
+        // Free decompressed data if it was allocated
+        if (bmhd.compression == 1 && final_planar_data && final_planar_data != body_data) {
+            free(final_planar_data);
         }
         free(body_data);
     } else {
