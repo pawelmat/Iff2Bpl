@@ -8,24 +8,29 @@
     Optionally creates a non-interleaved planar format file (.bpf) for specific development needs.
     The output files will be named based on the input file name, with .bpl, .pal, .chk, and .bpf extensions.
 
-    Usage: iff2bpl [-o output_name] [-c] [-ni] <input.iff>
+    Usage: iff2bpl [-o output_name] [-c] [-cd] [-ni] <input.iff>
     Options:
       -o output_name  Specify custom base name for output files
       -c              Also create chunky format output (.chk file)
+      -cd             Also create chunky format with bit doubling (.chk file)
       -ni             Also create non-interleaved planar format (.bpf file)
 
     Examples: 
       iff2bpl myimage.iff                Creates myimage.bpl and myimage.pal
       iff2bpl -o sprite myimage.iff      Creates sprite.bpl and sprite.pal
       iff2bpl -c myimage.iff             Creates myimage.bpl, myimage.pal and myimage.chk
+      iff2bpl -cd myimage.iff            Creates myimage.bpl, myimage.pal and myimage.chk (bit doubled)
       iff2bpl -ni myimage.iff            Creates myimage.bpl, myimage.pal and myimage.bpf
       iff2bpl -c -ni -o sprite myimage.iff Creates sprite.bpl, sprite.pal, sprite.chk and sprite.bpf
 
     Output: 
       .bpl file - Raw bitplane data (interleaved format for Amiga hardware - default)
       .pal file - Palette data (16-bit words in Amiga color register format)
-      .chk file - Chunky pixel data (8-bit per pixel, optional with -c flag)
+      .chk file - Chunky pixel data (8-bit per pixel, optional with -c or -cd flags)
       .bpf file - Non-interleaved planar data (all rows of plane 0, then plane 1, etc., optional with -ni flag)
+
+    The -cd option creates chunky data where each bit of the 4 least significant bits is doubled.
+    For example: 00000001 becomes 00000011, 00000010 becomes 00001100, 00001101 becomes 11110011.
 
     Compiles with: gcc iff2bpl.c -o iff2bpl.exe
     You can also use VS Code with the included configuration files to build this project.
@@ -125,9 +130,10 @@ size_t decompress_packbits(const uint8_t* src, size_t src_len, uint8_t* dst, siz
 }
 
 void print_usage(const char* program_name) {
-    printf("Usage: %s [-o output_name] [-c] [-ni] <.iff file>\n", program_name);
+    printf("Usage: %s [-o output_name] [-c] [-cd] [-ni] <.iff file>\n", program_name);
     printf("  -o output_name  Specify custom base name for output files\n");
     printf("  -c              Also create chunky format output (.chk file)\n");
+    printf("  -cd             Also create chunky format with doubled bits (.chk file)\n");
     printf("  -ni             Also create non-interleaved planar format (.bpf file)\n");
     printf("  <.iff file>     Input IFF/ILBM file to convert\n");
     printf("\n");
@@ -135,13 +141,14 @@ void print_usage(const char* program_name) {
     printf("  %s image.iff              Creates image.bpl and image.pal\n", program_name);
     printf("  %s -o sprite image.iff    Creates sprite.bpl and sprite.pal\n", program_name);
     printf("  %s -c image.iff           Creates image.bpl, image.pal and image.chk\n", program_name);
+    printf("  %s -cd image.iff          Creates image.bpl, image.pal and image.chk (doubled)\n", program_name);
     printf("  %s -ni image.iff          Creates image.bpl, image.pal and image.bpf\n", program_name);
     printf("  %s -c -ni -o sprite image.iff Creates sprite.bpl, sprite.pal, sprite.chk and sprite.bpf\n", program_name);
 }
 
 // Convert planar bitplane data to chunky format
 void convert_to_chunky(const uint8_t* planar_data, uint8_t* chunky_data, 
-                      uint16_t width, uint16_t height, uint8_t num_planes) {
+                      uint16_t width, uint16_t height, uint8_t num_planes, int double_bits) {
     size_t row_bytes = ((width + 15) / 16) * 2; // bytes per row per plane
     
     for (uint16_t y = 0; y < height; y++) {
@@ -161,7 +168,18 @@ void convert_to_chunky(const uint8_t* planar_data, uint8_t* chunky_data,
                 }
             }
             
-            chunky_data[y * width + x] = pixel_value;
+            if (double_bits) {
+                // Double each bit of the 4 least significant bits
+                uint8_t doubled_value = 0;
+                for (int bit = 0; bit < 4; bit++) {
+                    if (pixel_value & (1 << bit)) {
+                        doubled_value |= (3 << (bit * 2)); // Set two consecutive bits
+                    }
+                }
+                chunky_data[y * width + x] = doubled_value;
+            } else {
+                chunky_data[y * width + x] = pixel_value;
+            }
         }
     }
 }
@@ -194,6 +212,7 @@ int main(int argc, char* argv[]) {
     const char* input_filename = NULL;
     const char* output_name = NULL;
     int create_chunky = 0;
+    int create_chunky_doubled = 0;
     int create_noninterleaved = 0;
     
     // Parse command line arguments
@@ -208,6 +227,8 @@ int main(int argc, char* argv[]) {
             }
         } else if (strcmp(argv[i], "-c") == 0) {
             create_chunky = 1;
+        } else if (strcmp(argv[i], "-cd") == 0) {
+            create_chunky_doubled = 1;
         } else if (strcmp(argv[i], "-ni") == 0) {
             create_noninterleaved = 1;
         } else {
@@ -418,7 +439,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Create chunky format if requested
-        if (create_chunky && final_planar_data && found_bmhd) {
+        if ((create_chunky || create_chunky_doubled) && final_planar_data && found_bmhd) {
             char chk_filename[512];
             snprintf(chk_filename, sizeof(chk_filename), "%s.chk", output_base);
             
@@ -427,9 +448,13 @@ int main(int argc, char* argv[]) {
             if (!chunky_data) {
                 fprintf(stderr, "Failed to allocate memory for chunky data\n");
             } else {
-                convert_to_chunky(final_planar_data, chunky_data, bmhd.width, bmhd.height, bmhd.numPlanes);
+                convert_to_chunky(final_planar_data, chunky_data, bmhd.width, bmhd.height, bmhd.numPlanes, create_chunky_doubled);
+                if (create_chunky_doubled) {
+                    printf("Chunky format (doubled bits) written to: %s (%zu bytes)\n", chk_filename, chunky_size);
+                } else {
+                    printf("Chunky format written to: %s (%zu bytes)\n", chk_filename, chunky_size);
+                }
                 write_bin(chk_filename, chunky_data, chunky_size);
-                printf("Chunky format written to: %s (%zu bytes)\n", chk_filename, chunky_size);
                 free(chunky_data);
             }
         }

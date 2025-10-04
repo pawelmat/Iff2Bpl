@@ -24,13 +24,14 @@ This tool converts IFF image files into formats suitable for Amiga applications:
 ## Usage
 
 ```bash
-iff2bpl [-o output_name] [-c] [-ni] <input.iff>
+iff2bpl [-o output_name] [-c] [-cd] [-ni] <input.iff>
 ```
 
 ### Options
 
 - `-o output_name` - Specify custom base name for output files
 - `-c` - Also create chunky format output (.chk file)
+- `-cd` - Also create chunky format with bit doubling (.chk file)
 - `-ni` - Also create non-interleaved planar format (.bpf file)
 - `<input.iff>` - Input IFF/ILBM file to convert
 
@@ -51,6 +52,9 @@ iff2bpl -ni image.iff
 
 # Combined options - creates sprite.bpl, sprite.pal, sprite.chk and sprite.bpf
 iff2bpl -c -ni -o sprite image.iff
+
+# Include chunky format with bit doubling - creates image.bpl, image.pal and image.chk
+iff2bpl -cd image.iff
 ```
 
 ## Output Files
@@ -66,6 +70,15 @@ Optional 8-bit per pixel format where each byte represents a complete pixel valu
 
 ### .bpf file (Non-interleaved Planar Data)
 Optional planar format where all rows of each bitplane are grouped together (plane 0 data, then plane 1 data, etc.) rather than interleaved by scanline. Useful for certain development workflows or tools that expect this data organization.
+
+## Bit Doubling (-cd option)
+
+The `-cd` option creates chunky data where each bit of the 4 least significant bits is expanded to 2 bits by replication. This effectively converts 4-bit color values to 8-bit values. This is useful with a particular class of C2P routines (up to 16 colours) which require such input.
+
+Examples:
+- `00000001` becomes `00000011`
+- `00000010` becomes `00001100`
+- `00001101` becomes `11110011`
 
 ## Technical Details
 
@@ -94,20 +107,8 @@ Use the included VS Code configuration files for building and debugging.
 - Standard C compiler (GCC, Clang, MSVC)
 - Standard C libraries (stdio, stdlib, stdint, string)
 
-## Example Workflow
-
-1. Create artwork in your favorite graphics editor
-2. Export as IFF/ILBM format
-3. Convert with iff2bpl: `iff2bpl -c myart.iff`
-4. Use the generated files in your Amiga project:
-   - `myart.bpl` - Load directly into chipram for hardware blitting
-   - `myart.pal` - Load into colour registers
-   - `myart.chk` - Use for software processing if needed
-
 ## License
 
 Copyright (c) 2025 Kane/Suspect  
 Licensed under the GNU GPLv3 License.
-
-
 
