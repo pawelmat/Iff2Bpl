@@ -35,7 +35,7 @@
     Compiles with: gcc iff2bpl.c -o iff2bpl.exe
     You can also use VS Code with the included configuration files to build this project.
 
-    Copyright (c) 2025 Kane/Suspect, provided under the GNU GPLv3 License.
+    Copyright (c) 2025 Kane/Suspect, provided under the GNU GPLv3 License. 
 */
 
 #include <stdio.h>
