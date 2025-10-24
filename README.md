@@ -1,7 +1,8 @@
-# IFF to Amiga Bitplane and Chunky Converter
+# IFF <> Amiga Bitplane (and Chunky) Converter
 
-- A command-line utility that converts ILBM (Interleaved Bitmap) IFF files to Amiga bitplane format and 8-bit chunky format.
-- A separate command-line utility that converts Amiga raw bitplane format to ILBM (Interleaved Bitmap) IFF files (note: palette has all colours other than 0 fixed to $FFF)
+This project consists of 2 command line utilities:  
+- **iff2bpl** Converts ILBM (Interleaved Bitmap) IFF files to Amiga bitplane format and 8-bit chunky format.
+- **bpl2iff** Converts Amiga raw bitplane format to ILBM (Interleaved Bitmap) IFF files (note: currently palette has all colours other than 0 fixed to $FFF)
 
 # iff2bpl
 
