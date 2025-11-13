@@ -10,7 +10,7 @@
         -y <ysize>    Vertical size of the picture in pixels (required)
         -n <bplnum>   Number of bitplanes (required)
         -i            Input bitplane rows are interleaved in memory (row0_plane0,row0_plane1,...). If omitted the input is expected to be non-interleaved (all rows of plane0, then plane1, ...)
-        -t            Input data is stored in byte-columns and must be transposed before conversion. Each column contains one byte per row; transpose reorders bytes to rows.
+        -t <colwidth> Input data is stored in byte-columns of specified width and must be transposed before conversion. Each column contains <colwidth> bytes per row; transpose reorders bytes to rows.
         -r            Compress the BODY chunk using PackBits (RLE). When omitted the BODY is written uncompressed.
         -o <output>   Base name for the output file (the program will append ".iff" if missing) (required)
         <input_file>  Path to the raw input file containing planar data
@@ -21,7 +21,7 @@
 
     Examples:
         bpl2iff -x 320 -y 256 -n 5 -o image.raw.iff input.bpl
-        bpl2iff -x 16 -y 4 -n 1 -t -o test.iff tests/test_input.bin
+        bpl2iff -x 16 -y 4 -n 1 -t 1 -o test.iff tests/test_input.bin
         bpl2iff -x 320 -y 200 -n 4 -r -o compressed.iff input.bpl
 
     Compile:
@@ -72,7 +72,7 @@ void write_be16(FILE* f, uint16_t v) {
 }
 
 void usage(const char* prog) {
-    fprintf(stderr, "Usage: %s -x <xsize> -y <ysize> -n <bplnum> [-i] -o <output_name> <input_file>\n", prog);
+    fprintf(stderr, "Usage: %s -x <xsize> -y <ysize> -n <bplnum> [-i] [-t <colwidth>] [-r] -o <output_name> <input_file>\n", prog);
 }
 
 // PackBits (ILBM RLE) encoder: compress src_len bytes into dynamically allocated buffer, returns size and sets out_len
@@ -146,6 +146,7 @@ int main(int argc, char* argv[]) {
     int xsize = -1, ysize = -1, bplnum = -1;
     int interleaved = 0;
     int transpose_cols = 0;
+    int transpose_col_width = 0;
     int use_rle = 0;
     const char* outname = NULL;
     const char* infile = NULL;
@@ -159,8 +160,9 @@ int main(int argc, char* argv[]) {
             bplnum = atoi(argv[++i]);
         } else if (strcmp(argv[i], "-i") == 0) {
             interleaved = 1;
-        } else if (strcmp(argv[i], "-t") == 0) {
-            transpose_cols = 1;
+        } else if (strcmp(argv[i], "-t") == 0 && i+1 < argc) {
+            transpose_col_width = atoi(argv[++i]);
+            if (transpose_col_width > 0) transpose_cols = 1;
         } else if (strcmp(argv[i], "-r") == 0) {
             use_rle = 1;
         } else if (strcmp(argv[i], "-o") == 0 && i+1 < argc) {
@@ -192,11 +194,13 @@ int main(int argc, char* argv[]) {
     // compute expected input size
     size_t row_bytes = ((xsize + 15) / 16) * 2; // bytes per row per plane (word-aligned as ILBM expects)
     size_t bytes_per_row_min = (xsize + 7) / 8; // minimal bytes per row (no word padding)
-    size_t columns = bytes_per_row_min; // number of byte-columns per row (transpose works on these bytes)
+    size_t columns = 0; // number of byte-columns per row (transpose works on these bytes)
     size_t plane_input_size;
     if (transpose_cols) {
-        // input stores columns: for c=0..columns-1 each has ysize bytes
-        plane_input_size = columns * (size_t)ysize;
+        // input stores columns: each column is transpose_col_width bytes wide, and each has ysize rows
+        // compute number of columns needed to cover bytes_per_row_min
+        columns = (bytes_per_row_min + transpose_col_width - 1) / transpose_col_width;
+        plane_input_size = columns * (size_t)transpose_col_width * (size_t)ysize;
     } else {
         // expect input rows padded to Amiga word boundary
         plane_input_size = row_bytes * ysize;
@@ -319,20 +323,22 @@ int main(int argc, char* argv[]) {
     }
 
     if (transpose_cols) {
-        // Input layout per plane: column-major bytes: for c=0..columns-1, for y=0..ysize-1 -> byte
-        // We'll transpose bytes: dst_row[y][c] = src_plane[c*ysize + y]
+        // Input layout per plane: column-major bytes: for c=0..columns-1, for y=0..ysize-1, for b=0..transpose_col_width-1 -> byte
+        // We'll transpose bytes: dst_row[y][c*transpose_col_width + b] = src_plane[(c*ysize + y)*transpose_col_width + b]
         for (int p = 0; p < bplnum; p++) {
             uint8_t* dst_plane = plane_buffers + (size_t)p * plane_size;
-            uint8_t* src_plane = data + (size_t)p * plane_input_size; // plane_input_size == columns * ysize
+            uint8_t* src_plane = data + (size_t)p * plane_input_size;
             // Zero destination plane
             memset(dst_plane, 0, plane_size);
             for (size_t c = 0; c < columns; c++) {
                 for (int y = 0; y < ysize; y++) {
-                    size_t sidx = c * (size_t)ysize + (size_t)y;
-                    if (sidx >= plane_input_size) continue;
-                    uint8_t val = src_plane[sidx];
-                    size_t didx = (size_t)y * row_bytes + c;
-                    if (didx < plane_size) dst_plane[didx] = val;
+                    for (int b = 0; b < transpose_col_width; b++) {
+                        size_t sidx = (c * (size_t)ysize + (size_t)y) * (size_t)transpose_col_width + (size_t)b;
+                        if (sidx >= plane_input_size) continue;
+                        uint8_t val = src_plane[sidx];
+                        size_t didx = (size_t)y * row_bytes + c * (size_t)transpose_col_width + (size_t)b;
+                        if (didx < plane_size) dst_plane[didx] = val;
+                    }
                 }
             }
             // rows are padded automatically since dst_plane was zeroed

@@ -122,7 +122,7 @@ The CMAP chunk created by `bpl2iff` will contain 2^n entries where `n` is the nu
 ## Usage
 
 ```
-bpl2iff -x <xsize> -y <ysize> -n <bplnum> [-i] [-t] [-r] -o <output_name> <input_file>
+bpl2iff -x <xsize> -y <ysize> -n <bplnum> [-i] [-t <colwidth>] [-r] -o <output_name> <input_file>
 ```
 
 Parameters:
@@ -130,7 +130,7 @@ Parameters:
 - `-y <ysize>` : vertical size in pixels (required)
 - `-n <bplnum>`: number of bitplanes (required)
 - `-i`         : input is interleaved rows per plane (optional)
-- `-t`         : input is stored in byte columns and must be transposed first (optional)
+- `-t <colwidth>`: input is stored in byte columns of specified width and must be transposed first (optional)
 - `-r`         : compress BODY with PackBits (RLE) (optional)
 - `-o <output_name>`: base name for output file (will have `.iff` appended if missing) (required)
 - `<input_file>`: path to raw input file (required)
@@ -143,13 +143,18 @@ gcc bpl2iff.c -o bpl2iff.exe
 
 ## Example / Test
 
-There are small test inputs and helpers in the `tests/` folder. See `tests/README.md` for details. A quick example using the provided test input:
+There are small test inputs and helpers in the `tests/` folder. See `tests/README.md` for details.
 
+Conversion of 8x8 1-bitplane fonts:
 ```bash
-./bpl2iff.exe -x 768 -y 8 -n 1 -t -r -o fonts.iff .\tests\FONTS01.FNT
+./bpl2iff.exe -x 768 -y 8 -n 1 -t 1 -r -o ./tests/fonts8.iff ./tests/fonts8.fnt
 ```
+This will create `fonts8.iff` which should be a 1-bitplane, RLE compressed font file.
 
-This will create `fonts.iff` which should be a 1-bitplane, RLE compressed font file.
+Conversion of 16x16 1-bitplane fonts:
+```bash
+./bpl2iff.exe -x 1536 -y 16 -n 1 -t 2 -r -o ./tests/fonts16.iff ./tests/fonts16.fnt
+```
 
 ## License
 
