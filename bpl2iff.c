@@ -207,6 +207,14 @@ int main(int argc, char* argv[]) {
     }
     size_t plane_size = row_bytes * ysize; // final plane size after padding rows to word boundary
     size_t expected_size = plane_input_size * bplnum;
+    
+    // Check if file might contain a color map at the end
+    uint32_t num_colors = 1u << bplnum;
+    if (num_colors > 256) num_colors = 256;
+    size_t palette_size = num_colors * 2; // 2 bytes per color in Amiga format
+    size_t expected_size_with_palette = expected_size + palette_size;
+    int has_custom_palette = 0;
+    uint16_t* custom_palette = NULL;
 
     FILE* inf = fopen(infile, "rb");
     if (!inf) {
@@ -218,8 +226,14 @@ int main(int argc, char* argv[]) {
     long fsize = ftell(inf);
     fseek(inf, 0, SEEK_SET);
 
-    if ((long)expected_size > fsize) {
-        fprintf(stderr, "Input file too small: expected %zu bytes, got %ld\n", expected_size, fsize);
+    // Check if file contains custom palette
+    if (fsize == (long)expected_size_with_palette) {
+        has_custom_palette = 1;
+    } else if (fsize == (long)expected_size) {
+        has_custom_palette = 0;
+    } else {
+        fprintf(stderr, "Input file size mismatch: expected %zu bytes (or %zu with palette), got %ld\n", 
+                expected_size, expected_size_with_palette, fsize);
         fclose(inf);
         return 1;
     }
@@ -236,6 +250,37 @@ int main(int argc, char* argv[]) {
         free(data);
         fclose(inf);
         return 1;
+    }
+    
+    // Read custom palette if present
+    if (has_custom_palette) {
+        custom_palette = (uint16_t*)malloc(palette_size);
+        if (!custom_palette) {
+            fprintf(stderr, "Out of memory (palette)\n");
+            free(data);
+            fclose(inf);
+            return 1;
+        }
+        // Read palette as bytes and convert to big-endian uint16_t
+        uint8_t* palette_bytes = (uint8_t*)custom_palette;
+        if (fread(palette_bytes, 1, palette_size, inf) != palette_size) {
+            fprintf(stderr, "Failed to read palette data\n");
+            free(custom_palette);
+            free(data);
+            fclose(inf);
+            return 1;
+        }
+        // Convert from big-endian bytes to host uint16_t
+        for (uint32_t i = 0; i < num_colors; i++) {
+            custom_palette[i] = ((uint16_t)palette_bytes[i*2] << 8) | palette_bytes[i*2 + 1];
+        }
+        printf("Found palette with %u colours at index %zu in the file.\n", num_colors, expected_size);
+        // printf("Palette: ");
+        // for (uint32_t i = 0; i < num_colors; i++) {
+        //     printf("%04X", custom_palette[i]);
+        //     if (i < num_colors - 1) printf(" ");
+        // }
+        // printf("\n");
     }
     fclose(inf);
 
@@ -288,20 +333,38 @@ int main(int argc, char* argv[]) {
     write_be16(out, bmhd.pageHeight);
 
     // CMAP chunk
-    // number of colors = 2^bplnum
-    uint32_t num_colors = 1u << bplnum;
-    if (num_colors > 256) num_colors = 256; // limit sanity
     size_t cmap_size = num_colors * 3;
     fwrite("CMAP",1,4,out);
     write_be32(out, (uint32_t)cmap_size);
-    // first color black, others white
-    for (uint32_t i = 0; i < num_colors; i++) {
-        if (i == 0) {
-            uint8_t rgb[3] = {0x00,0x00,0x00};
-            fwrite(rgb,1,3,out);
-        } else {
-            uint8_t rgb[3] = {0xFF,0xFF,0xFF};
-            fwrite(rgb,1,3,out);
+    
+    if (has_custom_palette && custom_palette) {
+        // Use custom palette from file
+        // Format is 0RGB: first byte = 0000RRRR, second byte = GGGGBBBB
+        int palette_warning_shown = 0;
+        for (uint32_t i = 0; i < num_colors; i++) {
+            uint16_t color = custom_palette[i];
+            // Check if the leading 4 bits are zero (valid 0RGB format)
+            if ((color & 0xF000) != 0 && !palette_warning_shown) {
+                fprintf(stderr, "Warning: Color %u has non-zero leading bits (0x%04X). Palette format might be incorrect.\n", i, color);
+                palette_warning_shown = 1;
+            }
+            // Extract 4-bit components and expand to 8-bit
+            uint8_t r = ((color >> 8) & 0x0F) * 17; // 0x0F -> 0xFF (multiply by 17)
+            uint8_t g = ((color >> 4) & 0x0F) * 17;
+            uint8_t b = (color & 0x0F) * 17;
+            uint8_t rgb[3] = {r, g, b};
+            fwrite(rgb, 1, 3, out);
+        }
+    } else {
+        // Default palette: first color black, others white
+        for (uint32_t i = 0; i < num_colors; i++) {
+            if (i == 0) {
+                uint8_t rgb[3] = {0x00,0x00,0x00};
+                fwrite(rgb,1,3,out);
+            } else {
+                uint8_t rgb[3] = {0xFF,0xFF,0xFF};
+                fwrite(rgb,1,3,out);
+            }
         }
     }
     // pad CMAP to even size
@@ -478,6 +541,7 @@ int main(int argc, char* argv[]) {
     fseek(out, 4, SEEK_SET);
     write_be32(out, form_size);
     fclose(out);
+    if (custom_palette) free(custom_palette);
     free(data);
 
     printf("Wrote ILBM file: %s (size %u bytes)\n", outfilename, form_size + 8);

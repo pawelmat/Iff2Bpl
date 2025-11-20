@@ -84,20 +84,7 @@ Examples:
 - `00000010` becomes `00001100`
 - `00001101` becomes `11110011`
 
-## Technical Details
-
-### Supported Formats
-- Input: ILBM (IFF) files with BMHD, CMAP, and BODY chunks
-- Compression: Uncompressed and RLE (PackBits) compressed data
-- Color depth: Supports multiple bitplanes (typically 1-8 planes)
-
-### Data Layout
-- **Bitplanes (interleaved)**: Row-by-row mixing of planes - Row0-Plane0, Row0-Plane1, Row1-Plane0, etc.
-- **Bitplanes (non-interleaved)**: All rows of each plane together - All Plane0 rows, then all Plane1 rows, etc.
-- **Palette**: 4-bit RGB values packed into 16-bit words (Amiga colour register 0RGB format)
-- **Chunky**: Linear pixel array, one byte per pixel
-
-## Building
+## Build
 
 ### With GCC
 ```bash
@@ -117,7 +104,9 @@ Use the included VS Code configuration files for building and debugging.
 
 `bpl2iff` converts raw Amiga planar bitplane data into an ILBM IFF file (FORM/ILBM) containing the `BMHD`, `CMAP` and `BODY` chunks. It supports interleaved and non-interleaved input, an optional byte-column transpose mode (`-t`) and optional PackBits (RLE) compression of the BODY chunk (`-r`).
 
-The CMAP chunk created by `bpl2iff` will contain 2^n entries where `n` is the number of bitplanes. The first palette entry is set to black (`00,00,00`) and all other entries are set to white (`FF,FF,FF`).
+The CMAP chunk created by `bpl2iff` contains 2^n entries where `n` is the number of bitplanes.  
+- If a palette of the matching number of colours is found at the end of the file (2^n * 2 bytes) then it is converted to the CMAP.
+- Otherwise the first palette entry is set to black (`00,00,00`) and all other entries are set to white (`FF,FF,FF`).
 
 ## Usage
 
@@ -154,6 +143,11 @@ This will create `fonts8.iff` which should be a 1-bitplane, RLE compressed font 
 Conversion of 16x16 1-bitplane fonts:
 ```bash
 ./bpl2iff.exe -x 1536 -y 16 -n 1 -t 2 -r -o ./tests/fonts16.iff ./tests/fonts16.fnt
+```
+
+Conversion of a 320x200 5-bitplane (interleaved) raw picture with a palette attached at the end:
+```bash
+./bpl2iff.exe -x 320 -y 200 -n 5 -r -i -o ./tests/dead.iff ./tests/dead.rawb
 ```
 
 ## License
