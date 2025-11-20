@@ -17,7 +17,8 @@
 
     Notes:
         - CMAP: the generated palette contains 2^n entries (where n is the number of bitplanes).
-                        The first entry is set to RGB 00,00,00 and the remaining entries are set to FF,FF,FF.
+                        If a palette is found at the end of the raw file, then it is used.
+                        Otherwise the first entry is set to RGB 00,00,00 and the remaining entries are set to FF,FF,FF.
 
     Examples:
         bpl2iff -x 320 -y 256 -n 5 -o image.raw.iff input.bpl
@@ -88,7 +89,7 @@ uint8_t* packbits_encode(const uint8_t* src, size_t src_len, size_t* out_len) {
         while (si + run_len < src_len && src[si] == src[si + run_len] && run_len < 128) run_len++;
         if (run_len >= 3) {
             // emit any pending literals before the run
-            // but in this simple loop we just emit run directly
+            // but in this simple loop just emit run directly
             out[di++] = (uint8_t)(1 - run_len); // n = -(run_len-1) in signed byte -> 1-run_len as unsigned
             out[di++] = src[si];
             si += run_len;
@@ -292,7 +293,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // We'll write FORM header with placeholder size, then patch it later
+    // Write FORM header with placeholder size, then patch it later
     fwrite("FORM",1,4,out);
     write_be32(out, 0); // placeholder for FORM size
     fwrite("ILBM",1,4,out);
@@ -317,7 +318,7 @@ int main(int argc, char* argv[]) {
     bmhd.pageWidth = xsize;
     bmhd.pageHeight = ysize;
 
-    // BMHD fields must be big-endian when written. We'll write each field explicitly.
+    // BMHD fields must be big-endian when written. Write each field explicitly.
     write_be16(out, bmhd.width);
     write_be16(out, bmhd.height);
     write_be16(out, bmhd.x);
@@ -373,9 +374,9 @@ int main(int argc, char* argv[]) {
         fwrite(&zero,1,1,out);
     }
 
-    // We'll write BODY later after preparing plane buffers so we can optionally compress with RLE.
+    // Write BODY later after preparing plane buffers to optionally compress with RLE.
 
-    // We must produce interleaved data in BODY regardless of input layout.
+    // Must produce interleaved data in BODY regardless of input layout.
     // Normalize input into per-plane buffers where each row is padded to 'row_bytes'.
     uint8_t* plane_buffers = (uint8_t*)malloc((size_t)bplnum * plane_size);
     if (!plane_buffers) {
@@ -387,7 +388,7 @@ int main(int argc, char* argv[]) {
 
     if (transpose_cols) {
         // Input layout per plane: column-major bytes: for c=0..columns-1, for y=0..ysize-1, for b=0..transpose_col_width-1 -> byte
-        // We'll transpose bytes: dst_row[y][c*transpose_col_width + b] = src_plane[(c*ysize + y)*transpose_col_width + b]
+        // Transpose bytes: dst_row[y][c*transpose_col_width + b] = src_plane[(c*ysize + y)*transpose_col_width + b]
         for (int p = 0; p < bplnum; p++) {
             uint8_t* dst_plane = plane_buffers + (size_t)p * plane_size;
             uint8_t* src_plane = data + (size_t)p * plane_input_size;
@@ -410,7 +411,7 @@ int main(int argc, char* argv[]) {
         // No transpose requested. Input layout may be interleaved or per-plane sequential (non-interleaved).
         if (interleaved) {
             // Input is interleaved rows per plane already but may have minimal bytes per row or padded rows.
-            // We need to read row-by-row from input and write into plane_buffers, expanding to padded row_bytes if necessary.
+            // Read row-by-row from input and write into plane_buffers, expanding to padded row_bytes if necessary.
             size_t in_row_bytes = bytes_per_row_min;
             size_t src_offset = 0;
             for (int y = 0; y < ysize; y++) {
